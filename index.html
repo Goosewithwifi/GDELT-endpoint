@@ -18,29 +18,33 @@ pre{white-space:pre-wrap;word-break:break-word;border:1px solid #8884;padding:10
   <button id="test">Run self-test</button>
 </p>
 <pre id="out">Ready.</pre>
- 
+
 <script>
 /* ---------- GDELT client (the backend logic) ---------- */
-const GDELT_BASE = "https://api.gdeltproject.org/api/v2/doc/doc";
+// GitHub Pages is static, so it cannot run server.js. Paste your Cloudflare Worker URL here
+// (see worker.js). Leave it empty to call GDELT directly, which only works if GDELT allows CORS.
+const PROXY_URL = "";
+const GDELT_BASE = PROXY_URL || "https://api.gdeltproject.org/api/v2/doc/doc";
 const MIN_GAP_MS = 5200;      // GDELT allows 1 request per 5 seconds
 let lastCall = 0;
- 
+
 function buildUrl(params) {
   return GDELT_BASE + "?" + new URLSearchParams({ format: "json", ...params });
 }
- 
+
 async function gdeltRequest(params, { retries = 2, timeoutMs = 20000 } = {}) {
   const url = buildUrl(params);
   for (let attempt = 0; attempt <= retries; attempt++) {
     const wait = lastCall + MIN_GAP_MS - Date.now();
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
     lastCall = Date.now();
- 
+
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = await fetch(url, { signal: ctrl.signal });
       const text = await res.text();
+      if (res.status === 502) throw new Error(text.slice(0, 300));
       if (res.status === 429 || res.status >= 500) {
         if (attempt < retries) continue;           // rate limited or server error: retry
         throw new Error("HTTP " + res.status + " after " + (attempt + 1) + " attempts");
@@ -60,7 +64,7 @@ async function gdeltRequest(params, { retries = 2, timeoutMs = 20000 } = {}) {
         if (attempt === retries) throw new Error("Request timed out after " + timeoutMs + " ms");
       } else if (err instanceof TypeError) {
         // fetch throws TypeError for network failures and CORS blocks
-        if (attempt === retries) throw new Error("Network or CORS failure: " + err.message);
+        if (attempt === retries) throw new Error((PROXY_URL ? "Cannot reach your proxy (check PROXY_URL): " : "Direct call to GDELT was blocked (CORS, ad blocker or network). Set up worker.js and fill in PROXY_URL: ") + err.message);
       } else {
         throw err;
       }
@@ -69,17 +73,17 @@ async function gdeltRequest(params, { retries = 2, timeoutMs = 20000 } = {}) {
     }
   }
 }
- 
+
 const searchArticles = (query, { timespan = "24h", maxrecords = 25, sort = "datedesc" } = {}) =>
   gdeltRequest({ query, mode: "artlist", timespan, maxrecords, sort });
- 
+
 const getVolume = (query, { timespan = "24h" } = {}) =>
   gdeltRequest({ query, mode: "timelinevol", timespan });
- 
+
 /* ---------- Test harness ---------- */
 const out = document.getElementById("out");
 const log = m => { out.textContent += "\n" + m; };
- 
+
 document.getElementById("run").onclick = async () => {
   out.textContent = "Fetching…";
   try {
@@ -87,7 +91,7 @@ document.getElementById("run").onclick = async () => {
     out.textContent = "URL: " + r.url + "\nHTTP " + r.status + "\n\n" + JSON.stringify(r.data, null, 2);
   } catch (e) { out.textContent = "FAILED: " + e.message; }
 };
- 
+
 document.getElementById("test").onclick = async () => {
   out.textContent = "Self-test (takes about 15 seconds because of GDELT's rate limit)…";
   const results = [];
@@ -96,7 +100,7 @@ document.getElementById("test").onclick = async () => {
     catch (e) { results.push("FAIL  " + name + " - " + e.message); }
     out.textContent = results.join("\n");
   };
- 
+
   await check("artlist returns articles", async () => {
     const { data } = await searchArticles("climate change", { maxrecords: 3 });
     if (!Array.isArray(data.articles) || !data.articles.length) throw new Error("no articles array");
@@ -104,20 +108,20 @@ document.getElementById("test").onclick = async () => {
     for (const k of ["url", "title", "seendate", "domain"]) if (!(k in a)) throw new Error("missing field " + k);
     return data.articles.length + " articles";
   });
- 
+
   await check("timelinevol returns a series", async () => {
     const { data } = await getVolume("climate change");
     const pts = data.timeline && data.timeline[0] && data.timeline[0].data;
     if (!pts || !pts.length) throw new Error("no timeline data");
     return pts.length + " points";
   });
- 
+
   await check("bad query is reported as an error", async () => {
     try { await searchArticles("a"); }
     catch (e) { return "got: " + e.message.slice(0, 60); }
     throw new Error("expected an error for a one-letter query");
   });
- 
+
   out.textContent = results.join("\n") + "\n\nDone.";
 };
 </script>

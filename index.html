@@ -23,7 +23,7 @@ pre{white-space:pre-wrap;word-break:break-word;border:1px solid #8884;padding:10
 /* ---------- GDELT client (the backend logic) ---------- */
 // GitHub Pages is static, so it cannot run server.js. Paste your Cloudflare Worker URL here
 // (see worker.js). Leave it empty to call GDELT directly, which only works if GDELT allows CORS.
-const PROXY_URL = "";
+const PROXY_URL = "https://blue-band-ab8c.arafatchande549.workers.dev/";
 const GDELT_BASE = PROXY_URL || "https://api.gdeltproject.org/api/v2/doc/doc";
 const MIN_GAP_MS = 5200;      // GDELT allows 1 request per 5 seconds
 let lastCall = 0;
